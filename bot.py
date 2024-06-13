@@ -12,7 +12,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNELID = int(os.getenv('CHANNELID'))
 # Define your API endpoint
-API_URL = 'http://127.0.0.1:5000/chatbot'
+API_URL=os.getenv('APIURL')
 
 # Initialize the bot with the required intents
 intents = discord.Intents.default()
