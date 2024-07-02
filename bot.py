@@ -1,9 +1,9 @@
+import json
 import discord
 from discord.ext import commands
-from discord.ui import Button, View
-import json
+from discord.ui import View, Button
 from dotenv import load_dotenv
-import os
+import os,logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -11,91 +11,90 @@ load_dotenv()
 # Retrieve the bot token and channel ID from the environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNELID = int(os.getenv('CHANNELID'))
-# Define your API endpoint
-API_URL=os.getenv('APIURL')
 
-# Initialize the bot with the required intents
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-intents.guilds = True
-
-# Initialize bot with command prefix
-bot = commands.Bot(command_prefix='/', intents=intents)
-
-# Read options data from JSON file
+# Load the JSON
 with open('menu_structure.json', 'r', encoding='utf-8') as file:
-    options_data = json.load(file)
+    menu_data = json.load(file)
+
+# Initialize the bot
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Your target channel ID
+TARGET_CHANNEL_ID = CHANNELID  # Replace with your channel ID
+
+class DynamicView(discord.ui.View):
+    try:
+        def __init__(self, options, previous_selection=None):
+            super().__init__(timeout=None)
+            self.options = options
+            self.previous_selection = previous_selection
+
+            # Add buttons for each option with numbers
+            for i, option in enumerate(options, start=1):
+                button = Button(label=str(i), custom_id=str(i),style=discord.ButtonStyle.blurple)
+                button.callback = self.create_callback(i, option)
+                self.add_item(button)
+
+            # Add "Back to Main Menu" button
+            back_button = Button(label="Back to Main Menu", style=discord.ButtonStyle.red, custom_id="back")
+            back_button.callback = self.back_to_main_menu
+            self.add_item(back_button)
+            
+    except Exception as e:
+        logging.info(f"{e} --- failed Init")
+    
+    
+    try:
+        def create_callback(self, index, option):
+            async def callback(interaction: discord.Interaction):
+                next_options = menu_data.get(option)
+                if isinstance(next_options, list):
+                    # Show the next set of options with numbers
+                    options_text = "\n".join([f"{i}. {opt}" for i, opt in enumerate(next_options, start=1)])
+                    embed = discord.Embed(title=f"Select an option from:\n\n",description=options_text, color=discord.Color.blue())
+
+                    await interaction.response.send_message(embed=embed, view=DynamicView(next_options, option))
+                else:
+                    # Show the final message
+                    await interaction.response.send_message(content=f'{option}\n\n {next_options}')
+            return callback
+        
+    except Exception as e:
+        logging.info(f"{e} --- callback failed")
+    
+       
+    async def back_to_main_menu(self, interaction: discord.Interaction):
+        try:             
+            options_text = "\n".join([f"{i}. {opt}" for i, opt in enumerate(menu_data['menu'], start=1)])
+            embed = discord.Embed(title=f"Choose an option:\n\n",description=options_text, color=discord.Color.blue())
+
+            await interaction.response.send_message(embed=embed, view=DynamicView(menu_data['menu']))
+        except Exception as e:
+            logging.info(f"{e} --- back to main menu failed")
+            pass
+       
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}')
     try:
-        synced = await bot.tree.sync()
-        print(f'Synced {len(synced)} command(s)')
-    except Exception as e:
-        print(f'Failed to sync commands: {e}')
+        logging.info(f'Logged in as {bot.user}')
 
-    # Generate the menu options directly in the channel
-    channel = bot.get_channel(CHANNELID)
-    if channel:
-        menu_key = "menu"
-        options = options_data.get(menu_key, [])
-        if options:
-            questions_text = "\n".join([f"{idx + 1}. {opt}" for idx, opt in enumerate(options)])
-            embed = discord.Embed(title=f"Please choose an option from {menu_key}:", description=questions_text, color=discord.Color.blue())
-            view = View()
-            for idx in range(len(options)):
-                view.add_item(OptionButton(label=str(idx + 1), custom_id=options[idx]))
-            await channel.send(embed=embed, view=view)
+        channel = bot.get_channel(TARGET_CHANNEL_ID)
+        if channel:
+            # Show initial options
+            options_text = "\n".join([f"{i}. {opt}" for i, opt in enumerate(menu_data['menu'], start=1)])
+            embed = discord.Embed(title=f"Hey Im happy to assist you...\nPlease choose an option below:\n\n",description=options_text, color=discord.Color.blue())
 
-async def show_menu(interaction, menu_key):
-    # Fetch options from the options data
-    options = options_data.get(menu_key, [])
-
-    if not options:
-        embed = discord.Embed(title="Error", description="No options available.", color=discord.Color.red())
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        return
-
-    questions_text = "\n".join([f"{idx + 1}. {opt}" for idx, opt in enumerate(options)])
-    embed = discord.Embed(title=f"Please choose an option from {menu_key}:", description=questions_text, color=discord.Color.blue())
-
-    view = View()
-    for idx in range(len(options)):
-        view.add_item(OptionButton(label=str(idx + 1), custom_id=options[idx]))
-
-    if menu_key != "menu":  # Add "Back to Main Menu" button if not on the main menu
-        view.add_item(BackToMenuButton())
-
-    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
-class OptionButton(Button):
-    def __init__(self, label, custom_id):
-        super().__init__(label=label, style=discord.ButtonStyle.primary, custom_id=custom_id)
-    
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        option_key = self.custom_id
-        # Fetch data for the selected option from JSON file
-        data = options_data.get(option_key)
-        if data:
-            if isinstance(data, list):
-                # If data is a list, send options menu for the selected option
-                await show_menu(interaction, option_key)
-            else:
-                # If data is not a list, send it as plain text
-                await interaction.followup.send(data, ephemeral=True)
+            await channel.send(embed=embed,view=DynamicView(menu_data['menu']))
+            # await channel.send(f"Choose an option:\n\n{options_text}", view=DynamicView(menu_data['menu']))
         else:
-            await interaction.followup.send("Data not available for this option.", ephemeral=True)
-
-class BackToMenuButton(Button):
-    def __init__(self):
-        super().__init__(label="Back to Main Menu", style=discord.ButtonStyle.danger)
+            logging.info(f"Channel with ID {TARGET_CHANNEL_ID} not found")
+            
+    except Exception as e:
+        logging.info(f"Bot ready failed --- {e}")
+        pass
     
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        await show_menu(interaction, "menu")
+    
 
-# Run the bot with your token
 bot.run(DISCORD_TOKEN)
