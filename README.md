@@ -2,6 +2,6 @@
 
 ### Add below keys in .env file
 
-# DISCORD_TOKEN=""
-# APIURL=
-# CHANNELID=
+- DISCORD_TOKEN=""
+- APIURL=
+- CHANNELID=
